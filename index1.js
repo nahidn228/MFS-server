@@ -3,7 +3,7 @@ const cors = require("cors");
 var jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
-
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const port = process.env.PORT || 5000;
 const app = express();
 
@@ -59,7 +59,30 @@ async function run() {
       });
     };
 
-    
+    //use verifyAdmin after verifyToken
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      // console.log({ user, email });
+      const isAdmin = user?.role === "admin";
+      if (!isAdmin) {
+        return res.status(403).send({ message: "Forbidden access" });
+      }
+      next();
+    };
+    //use verifyAgent after verifyToken
+    const verifyAgent = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+      // console.log({ user, email });
+      const isAdmin = user?.role === "agent";
+      if (!isAdmin) {
+        return res.status(403).send({ message: "Forbidden access" });
+      }
+      next();
+    };
 
     // User related API
     app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
