@@ -1,5 +1,7 @@
 const express = require("express");
 const cors = require("cors");
+const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 var jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
@@ -9,6 +11,15 @@ const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+const userSchema = new mongoose.Schema({
+  name: String,
+  email: { type: String, unique: true },
+  password: String,
+});
+
+const User = mongoose.model("User", userSchema);
+const JWT_SECRET = process.env.ACCESS_TOKEN_SECRET;
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.dssil.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
 
@@ -59,29 +70,39 @@ async function run() {
       });
     };
 
-    
-
     // User related API
-    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
+    app.get("/users", verifyToken, async (req, res) => {
       const result = await userCollection.find().toArray();
       res.send(result);
     });
-    app.get("/users/admin/:email", verifyToken, async (req, res) => {
-      const email = req.params.email;
 
-      if (email !== req.decoded.email) {
-        return res.status(403).send({ message: "forbidden access" });
-      }
+    //***************************************************
+    //              Registration related API
+    //  *************************************************/
 
-      const query = { email: email };
-      const user = await userCollection.findOne(query);
-      let admin = false;
-      if (user) {
-        admin = user?.role === "admin";
+    // User Registration
+    app.post("/register", async (req, res) => {
+      const { name, email, password } = req.body;
+
+      try {
+        // Hash the password
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        // Save user
+        const newUser = new User({ name, email, password: hashedPassword });
+        await newUser.save();
+
+        res.status(201).json({ message: "User registered successfully" });
+      } catch (error) {
+        res.status(500).json({ error: "Error registering user" });
       }
-      res.send({ admin });
     });
 
+    //***************************************************
+    //              User related API
+    //  *************************************************/
+
+    //insert a new user
     app.post("/users", async (req, res) => {
       const user = req.body;
       const query = { email: user.email };
@@ -93,24 +114,35 @@ async function run() {
       res.send(result);
     });
 
-    app.patch(
-      "/users/admin/:id",
-      verifyToken,
-      verifyAdmin,
-      async (req, res) => {
-        const id = req.params.id;
-        const filter = { _id: new ObjectId(id) };
-        const updatedDoc = {
-          $set: {
-            role: "agent",
-          },
-        };
-        const result = await userCollection.updateOne(filter, updatedDoc);
-        res.send(result);
-      }
-    );
+    // get all user info
 
-    app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
+    app.get("/allUsers", async (req, res) => {
+      const result = await userCollection.find().toArray();
+      res.send(result);
+    });
+
+    // get a user info using email
+    app.get("/user/:email", async (req, res) => {
+      const email = req.params.email;
+      const filter = { email: email };
+      const result = await userCollection.findOne(filter);
+      console.log(result);
+      res.send(result);
+    });
+
+    app.patch("/users/admin/:id", verifyToken, async (req, res) => {
+      const id = req.params.id;
+      const filter = { _id: new ObjectId(id) };
+      const updatedDoc = {
+        $set: {
+          role: "agent",
+        },
+      };
+      const result = await userCollection.updateOne(filter, updatedDoc);
+      res.send(result);
+    });
+
+    app.delete("/users/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await userCollection.deleteOne(query);
@@ -130,7 +162,7 @@ async function run() {
       // console.log(result);
       res.send(result);
     });
-    app.post("/menu", verifyToken, verifyAdmin, async (req, res) => {
+    app.post("/menu", verifyToken, async (req, res) => {
       const item = req.body;
       const result = await menuCollection.insertOne(item);
       res.send(result);
@@ -153,7 +185,7 @@ async function run() {
       res.send(result);
     });
 
-    app.delete("/menu/:id", verifyToken, verifyAdmin, async (req, res) => {
+    app.delete("/menu/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const result = await menuCollection.deleteOne(query);
@@ -231,7 +263,7 @@ async function run() {
     });
 
     // stats or analytics
-    app.get("/admin-stats", verifyToken, verifyAdmin, async (req, res) => {
+    app.get("/admin-stats", verifyToken, async (req, res) => {
       const users = await userCollection.estimatedDocumentCount();
       const menuItem = await menuCollection.estimatedDocumentCount();
       const orders = await paymentsCollection.estimatedDocumentCount();
@@ -263,7 +295,7 @@ async function run() {
 
     // Order status
     //using aggregate pipeline
-    app.get("/order-stats", verifyToken, verifyAdmin, async (req, res) => {
+    app.get("/order-stats", verifyToken, async (req, res) => {
       const result = await paymentsCollection
         .aggregate([
           {
